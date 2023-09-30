@@ -1,0 +1,285 @@
+'''
+Preprocess pose features
+python data/skeleton.py -path2data ../dataset/groot/data/speech2gesture_data -path2outdata ../dataset/groot/data -speaker "['all']" -preprocess_methods "'data'"
+
+python data/skeleton.py -path2data ../dataset/groot/data -path2outdata ../dataset/groot/data -speaker "['all']" -preprocess_methods "'normalize'"
+'''
+import os
+import sys
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from argsUtils import *
+from datetime import datetime
+
+from common import Modality, MissingData, HDF5
+import h5py
+
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import pdb
+from tqdm import tqdm
+from joblib import Parallel, delayed
+import warnings
+
+import shutil
+
+
+def get_children(h5, keys, datasets, parent):
+  for key in keys:
+    if h5.get(key):
+      if isinstance(h5[key], h5py.Dataset):
+        datasets.append(parent + '/' + key)
+      else:
+        #new_keys = [key+'/{}'.format(K) for K in h5[key].keys()]
+        get_children(h5[key], h5[key].keys(), datasets, parent + '/' + key)
+
+def recopy_datasets(filename):
+  filename = filename.as_posix()
+  backup_filename = filename + '.backup'
+  shutil.copyfile(filename, backup_filename)
+  #pdb.set_trace()
+  h5 = HDF5.h5_open(filename, 'r')
+  print(h5['pose'].keys())
+  datasets = []
+  get_children(h5, h5.keys(), datasets, '')
+
+  backup2_filename = filename + '.backup2'
+  h5new = HDF5.h5_open(backup2_filename, 'a')
+  h5new.close()
+  #pdb.set_trace()
+  for dataset in datasets:
+    HDF5.append(backup2_filename, dataset, h5[dataset][()])
+  h5.close()
+  
+  #shutil.copyfile(backup2_filename, filename)
+  
+  return datasets, backup2_filename
+
+class Skeleton2D(Modality):
+  def __init__(self, path2data='../dataset/groot/data/speech2gesture_data',
+               path2outdata='../dataset/groot/data',
+               speaker='all',
+               preprocess_methods=['data']):
+    super(Skeleton2D, self).__init__()
+    self.path2data = path2data
+    self.df = pd.read_csv(Path(self.path2data)/'cmu_intervals_df.csv', dtype=object)
+    self.df.loc[:, 'delta_time'] = self.df['delta_time'].apply(float)
+    self.df.loc[:, 'interval_id'] = self.df['interval_id'].apply(str)
+    
+    self.path2outdata = path2outdata
+    self.speaker = speaker
+    self.preprocess_methods = preprocess_methods
+    
+    self.missing = MissingData(self.path2outdata)
+
+  def preprocess(self):
+    if self.speaker[0] != 'all':
+      speakers = self.speaker
+    else:
+      speakers = self.speakers
+
+    for speaker in tqdm(speakers, desc='speakers', leave=False):
+      tqdm.write('Speaker: {}'.format(speaker))
+      df_speaker = self.get_df_subset('speaker', speaker)
+      interval_ids = df_speaker['interval_id'].unique()
+
+      m = []
+      for interval_id in tqdm(interval_ids, desc='intervals'):
+        m_ = self.save_intervals(interval_id, speaker)
+        m.append(m_)
+      pdb.set_trace()
+
+      missing_data_list = Parallel(n_jobs=-1)(delayed(self.save_intervals)(interval_id, speaker)
+                                          for interval_id in tqdm(interval_ids))
+      self.missing.save_intervals(missing_data_list)
+      
+  def save_intervals(self, interval_id, speaker):
+    ## process keypoints for each interval
+    if self.preprocess_methods == 'data':
+      process_interval = self.process_interval
+    elif self.preprocess_methods == 'normalize':
+      process_interval = self.normalize
+    else:
+      raise 'preprocess_methods = {} not found'.format(self.preprocess_methods)
+    
+    keypoints = process_interval(interval_id)
+    if keypoints is None:
+      return interval_id
+
+    ## save keypoints
+    filename = Path(self.path2outdata)/'processed1'/speaker/'{}.h5'.format(interval_id)
+    key = self.add_key(self.h5_key, self.preprocess_methods)
+    try:
+      self.append(filename, key, keypoints)
+    except:
+      #return interval_id
+      _, backup2_filename = recopy_datasets(filename)
+      pdb.set_trace()
+      try:
+        self.append(backup2_filename, key, keypoints)
+        shutil.copyfile(backup2_filename, filename.as_posix())
+      except:
+        pdb.set_trace()
+        return interval_id
+    return None
+
+  def normalize(self, interval_id):
+    ## get filename from interval_id
+    speaker = self.get_df_subset('interval_id', interval_id).iloc[0].speaker
+    filename = Path(self.path2outdata)/'processed1'/speaker/'{}.h5'.format(interval_id)
+
+    ## Reference shoulder length
+    ref_len = 167
+    
+    ## load keypoints
+    try:
+      data, h5 = self.load(filename, 'pose/data')
+      data = data[()]
+      h5.close()
+    except:
+      print(filename)
+      exit(1)
+    ## exception
+    if len(data.shape) == 3:
+      return None
+    ## normalize
+    ratio = ref_len/((data.reshape(data.shape[0], 2, -1)[..., 1]**2).sum(1)**0.5)
+    keypoints = ratio.reshape(-1, 1) * data
+    keypoints[:, [0, 52]] = data[:, [0, 52]]
+    
+    return keypoints
+  
+  def process_interval(self, interval_id):
+    file_list = self.get_filelist(interval_id)
+    if file_list is None:
+      return None
+
+    keypoints_list = [np.loadtxt(filename) for filename in file_list]
+
+    keypoints = np.stack(keypoints_list, axis=0)
+    keypoints = self.process_keypoints(keypoints)
+
+    return keypoints
+
+  def process_keypoints(self, keypoints, inv=False):
+    if not inv:
+      keypoints_new = keypoints - keypoints[..., self.root:self.root+1]
+      keypoints_new[..., self.root] = keypoints[..., self.root]
+      keypoints_new = keypoints_new.reshape(keypoints_new.shape[0], -1)
+    else:
+      keypoints = keypoints.reshape(keypoints.shape[0], 2, -1)
+      keypoints_new = keypoints + keypoints[..., self.root:self.root+1]
+      keypoints_new[..., self.root] = keypoints[..., self.root]
+    return keypoints_new
+
+  def get_filelist(self, interval_id):
+    df = self.df[self.df['interval_id'] == interval_id]
+    start_time = df['start_time'].values[0].split(' ')[-1][1:]
+    end_time = df['end_time'].values[0].split(' ')[-1][1:]
+    speaker = df['speaker'].values[0]
+    video_fn = df['video_fn'].values[0].split('.')[0] ## the folder names end at the first period of the video_fn
+    video_fn = Path('_'.join(video_fn.split(' '))) ## the folder names have `_` instead of ` `
+    path2keypoints = '{}/{}/keypoints_simple/{}/'.format(self.path2data, speaker, video_fn)
+    file_df = pd.DataFrame(data=os.listdir(path2keypoints), columns=['files_temp'])
+    file_df['files'] = file_df['files_temp'].apply(lambda x: (Path(path2keypoints)/x).as_posix())
+    file_df['start_time'] = file_df['files_temp'].apply(self.get_time_from_file)
+    file_df = file_df.sort_values(by='start_time').reset_index()
+
+    try:
+      start_id = file_df[file_df['start_time'] == start_time].index[0]
+      end_id = file_df[file_df['start_time'] == end_time].index[0]
+    except:
+      return None
+    if not (self.are_keypoints_complete(file_df, start_id, end_id)):
+      #self.missing.append_interval(interval_id)
+      warnings.warn('interval_id: {} not found.'.format(interval_id))
+      return None
+    return file_df.iloc[start_id:end_id+1]['files'].values
+
+  def are_keypoints_complete(self, file_df, start_id, end_id):
+    # frames = (end_id + 1) - start_id
+    # diff = (datetime.strptime(end_time, '%H:%M:%S.%f') - datetime.strptime(start_time, '%H:%M:%S.%f')).total_seconds()
+    # diff_frames = (self.fs * diff) - frames
+    flag = (((file_df.iloc[start_id+1:end_id+1].start_time.apply(pd.to_timedelta).reset_index() - file_df.iloc[start_id:end_id].start_time.apply(pd.to_timedelta).reset_index())['start_time'].apply(lambda x: x.total_seconds()) - 1/self.fs('pose')).apply(abs) > 0.00008).any()
+    if flag:
+      return False
+    # if abs(diff_frames) >= 2:
+    #   return False
+
+    return True
+
+  def get_time_from_file(self, x):
+    x_cap = ':'.join('.'.join(x.split('.')[:-1]).split('_')[-3:]).split('.')
+    if len(x_cap) == 1: ## sometimes the filnames do not have miliseconds as it is all zeros
+      x_cap = '.'.join(x_cap + ['000000'])
+    else:
+      x_cap = '.'.join(x_cap)
+    return x_cap
+
+  @property
+  def parents(self):
+    return [-1,
+            0, 1, 2,
+            0, 4, 5,
+            0, 7, 7,
+            6,
+            10, 11, 12, 13,
+            10, 15, 16, 17,
+            10, 19, 20, 21,
+            10, 23, 24, 25,
+            10, 27, 28, 29,
+            3,
+            31, 32, 33, 34,
+            31, 36, 37, 38,
+            31, 40, 41, 42,
+            31, 44, 45, 46,
+            31, 48, 49, 50]
+
+  @property
+  def joint_subset(self):
+    ## choose only the relevant skeleton key-points (removed nose and eyes)
+    return np.r_[range(7), range(10, len(self.parents))]
+
+  @property
+  def root(self):
+    return 0
+
+  @property
+  def joint_names(self):
+    return ['Neck',
+            'RShoulder', 'RElbow', 'RWrist',
+            'LShoulder', 'LElbow', 'LWrist',
+            'Nose', 'REye', 'LEye',
+            'LHandRoot',
+            'LHandThumb1', 'LHandThumb2', 'LHandThumb3', 'LHandThumb4',
+            'LHandIndex1', 'LHandIndex2', 'LHandIndex3', 'LHandIndex4',
+            'LHandMiddle1', 'LHandMiddle2', 'LHandMiddle3', 'LHandMiddle4',
+            'LHandRing1', 'LHandRing2', 'LHandRing3', 'LHandRing4',
+            'LHandLittle1', 'LHandLittle2', 'LHandLittle3', 'LHandLittle4',
+            'RHandRoot',
+            'RHandThumb1', 'RHandThumb2', 'RHandThumb3', 'RHandThumb4',
+            'RHandIndex1', 'RHandIndex2', 'RHandIndex3', 'RHandIndex4',
+            'RHandMiddle1', 'RHandMiddle2', 'RHandMiddle3', 'RHandMiddle4',
+            'RHandRing1', 'RHandRing2', 'RHandRing3', 'RHandRing4',
+            'RHandLittle1', 'RHandLittle2', 'RHandLittle3', 'RHandLittle4'
+    ]
+
+  def fs(self, modality):
+    return 15
+
+  @property
+  def h5_key(self):
+    return 'pose'
+
+def preprocess(args, exp_num):
+  path2data = args.path2data #'../dataset/groot/speech2gesture_data/'
+  path2outdata = args.path2outdata #'../dataset/groot/data'
+  speaker = args.speaker
+  preprocess_methods = args.preprocess_methods
+  skel = Skeleton2D(path2data, path2outdata, speaker, preprocess_methods)
+  skel.preprocess()
+
+if __name__ == '__main__':
+  argparseNloop(preprocess)
