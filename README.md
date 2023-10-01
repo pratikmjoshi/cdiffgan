@@ -34,7 +34,6 @@ This repo has information on the training code and pre-trained models.
 - [Setting up repo](##setting-up-the-repo).
 - [Environment setup and library installations](##environment-setup-and-library-installations)
 - [Training a Gesture Generation Model](##training-a-gesture-generation-model)
-- [Inference from a trained model](##inference-from-a-trained-model)
 - [Generating rendered samples](##generating-rendered-samples)
 
 ## Setting up the repo
@@ -209,9 +208,6 @@ exp_8103_cpk_StyleDiffGAN4_G_speaker_[['oliver'], ['oliver', 'maher', 'chemistry
 ```
 
 The suffixes here are the most important, and we will use them later. Also, each new exp will create a new enumeration for the prefix `exp_<NUM>`.
-
-## Inference from a trained model
-TODO
 
 ## Generating rendered samples
 Once the model has been trained, you can use the saved model files to generate gestures and renders for the evaluation and test data of PATS. The command to do so is:
