@@ -37,7 +37,6 @@ torch_*.yml
 *.p
 *.pyc
 *.sbatch
-*.png
 *.job
 *.h
 *.err
