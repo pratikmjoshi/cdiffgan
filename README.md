@@ -1,11 +1,32 @@
-# Documentation for Gesture Generation Codebase
+# C-DiffGAN
 
-This repo contains the scripts required to run the following models in the continual learning/fewshot setting:
-- [Mix-StAGE](https://github.com/chahuja/mix-stage)
-- [DiffGAN](https://openaccess.thecvf.com/content/CVPR2022/papers/Ahuja_Low-Resource_Adaptation_for_Personalized_Co-Speech_Gesture_Generation_CVPR_2022_paper.pdf)
-- A continual learning variant of DiffGAN
+This is the official repository for the paper *Continual Learning for Personalized Co-Speech Gesture Generation*.
+
+[Chaitanya Ahuja](http://chahuja.com), [Pratik Joshi](https://pratikmjoshi.github.io/), [Ryo Ishii](https://www.rd.ntt/e/organization/researcher/special/s_060.html), [Louis-Philippe Morency](https://www.cs.cmu.edu/~morency/) - [ICCV2023](https://iccv2023.thecvf.com/)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+Links: [Paper](https://openaccess.thecvf.com/content/ICCV2023/papers/Ahuja_Continual_Learning_for_Personalized_Co-speech_Gesture_Generation_ICCV_2023_paper.pdf), [Demo+Project Website](http://chahuja.com/mix-stage), [Dataset Website](http://chahuja.com/pats)
+
+Bibtex:
+
+```sh
+@inproceedings{Ahuja_2023_ICCV,
+    author={Ahuja, Chaitanya and Joshi, Pratik and Ishii, Ryo and Morency, Louis-Philippe},
+    title={Continual Learning for Personalized Co-speech Gesture Generation},
+    booktitle={Proceedings of the IEEE/CVF International Conference on Computer Vision (ICCV)},
+    month={October},
+    year={2023},
+    pages={20893-20903}
+}
+```
 
 ## Overview
+# Overview
+
+![overview](figs/overview.png)
+
+This repo has information on the training code and pre-trained models. 
 
 **Dataset**: This repo uses a different version of [PATS](https://chahuja.com/pats/) dataset for our gesture generation experiments. The dataset link for download is here: googledrivelink
 
@@ -19,7 +40,7 @@ This repo contains the scripts required to run the following models in the conti
 ## Setting up the repo
 The repo can be cloned by running: 
 ```
-git clone https://github.com/chahuja/groot_cl
+git clone https://github.com/chahuja/cdiffgan
 ```
 *Note that this only contains the scripts and not the data.*
 
@@ -29,7 +50,7 @@ git clone https://github.com/chahuja/groot_cl
 
 This is a library for keeping variable names, state tracking and logging within the repo. Run the following:
 ```
-cd groot_cl
+cd cdiffgan
 mkdir ../pycasper
 git clone https://github.com/chahuja/pycasper ../pycasper
 
@@ -60,14 +81,14 @@ pip install <LIBRARY NAME>==<VERSION>
 To confirm, you may need to run the subsequent training and inference scripts to see if the environment operates as needed.
 
 3. **Dataset Storage**
-Unzip the downloaded dataset inside `groot_cl/datasets/`. 
+Unzip the downloaded dataset inside `cdiffgan/datasets/`. 
 
 ## Training a Gesture Generation Model
 **Note that this repository requires SLURM or some equivalent scheduler. If you do not have it, alternate steps are listed.** 
 
 ### 1. Create a save directory
 
- `mkdir groot_cl/src/<save_dir_name>`. This is where all the trained model weights, and even the renders will be stored. For convenience, call this `save/`. If possible, create the save directory within `groot_cl/src/`. If there is a space issue, you can create a softlink inside `groot_cl/src/` to a save directory outside the repo, via:
+ `mkdir cdiffgan/src/<save_dir_name>`. This is where all the trained model weights, and even the renders will be stored. For convenience, call this `save/`. If possible, create the save directory within `cdiffgan/src/`. If there is a space issue, you can create a softlink inside `cdiffgan/src/` to a save directory outside the repo, via:
  ```
  cd src/
  ln -s <YOUR_SAVE_DIRECTORY> save/
